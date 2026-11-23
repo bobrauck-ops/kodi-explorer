@@ -1,0 +1,10 @@
+{
+  "tmdbKey": "PASTE_YOUR_TMDB_API_KEY_OR_READ_ACCESS_TOKEN",
+  "kodi": {
+    "host": "192.168.1.45",
+    "port": 8080,
+    "user": "kodi",
+    "password": "YOUR_KODI_WEB_PASSWORD"
+  },
+  "listenPort": 3000
+}

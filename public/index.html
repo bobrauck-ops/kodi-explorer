@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodi Explorer</title>
+<style>
+  :root { --bg:#12141a; --panel:#1b1e27; --line:#2b3040; --text:#e8eaf0; --dim:#8b92a6; --accent:#f5b83d; --chip:#262b39; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; }
+  header h1 { font-size:16px; margin:0; color:var(--accent); cursor:pointer; white-space:nowrap; }
+  #q { flex:1; max-width:520px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:15px; }
+  #trail { padding:8px 20px; color:var(--dim); font-size:13px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; border-bottom:1px solid var(--line); min-height:36px; }
+  #trail a { color:var(--dim); cursor:pointer; text-decoration:none; } #trail a:hover { color:var(--text); }
+  main { padding:20px; max-width:1200px; margin:0 auto; }
+  .hero { display:flex; gap:22px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:22px; }
+  .hero img { width:170px; border-radius:8px; align-self:flex-start; background:#000; }
+  .hero h2 { margin:0 0 4px; font-size:24px; }
+  .meta { color:var(--dim); margin-bottom:10px; }
+  .overview { color:#c9cede; max-width:760px; margin:10px 0 14px; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:7px 0; }
+  .row .lbl { width:78px; color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .chip { background:var(--chip); border:1px solid var(--line); border-radius:999px; padding:3px 11px; cursor:pointer; font-size:13px; color:var(--text); }
+  .chip:hover { border-color:var(--accent); color:var(--accent); }
+  .chip.year { color:var(--accent); }
+  button.play { background:var(--accent); color:#1a1300; border:0; border-radius:8px; padding:10px 18px; font-weight:700; font-size:15px; cursor:pointer; margin-top:6px; }
+  button.play:hover { filter:brightness(1.1); }
+  h3 { margin:26px 0 10px; font-size:15px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:14px; }
+  .card { cursor:pointer; } .card img { width:100%; aspect-ratio:2/3; object-fit:cover; border-radius:8px; background:var(--panel); border:1px solid var(--line); }
+  .card:hover img { border-color:var(--accent); }
+  .card .t { font-size:13px; margin-top:5px; } .card .s { font-size:12px; color:var(--dim); }
+  .noimg { aspect-ratio:2/3; border-radius:8px; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:12px; text-align:center; padding:6px; }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; display:none; z-index:9; }
+  footer { color:var(--dim); font-size:12px; text-align:center; padding:30px 20px; }
+  .msg { color:var(--dim); padding:30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="home">&#9670; Kodi Explorer</h1>
+  <input id="q" placeholder="Search a movie, actor, or director…" autocomplete="off">
+</header>
+<div id="trail"></div>
+<main id="view"><p class="msg">Search for a movie or person to start exploring.</p></main>
+<div id="toast"></div>
+<footer>This product uses the TMDB API but is not endorsed or certified by TMDB. Data and images from The Movie Database (themoviedb.org).</footer>
+
+<script>
+const IMG = 'https://image.tmdb.org/t/p/';
+const $ = (s) => document.querySelector(s);
+const view = $('#view'), trailEl = $('#trail');
+let trail = [];   // [{key,label,hash}]
+
+async function tmdb(p, params = {}) {
+  const u = new URL('/tmdb' + p, location.origin);
+  Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+  const r = await fetch(u);
+  if (!r.ok) throw new Error('TMDB error ' + r.status);
+  return r.json();
+}
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const year = (d) => (d || '').slice(0, 4);
+
+function card(href, img, title, sub) {
+  return `<div class="card" onclick="location.hash='${href}'">
+    ${img ? `<img loading="lazy" src="${IMG}w342${img}" alt="">` : `<div class="noimg">${esc(title)}</div>`}
+    <div class="t">${esc(title)}</div><div class="s">${esc(sub || '')}</div></div>`;
+}
+const chip = (href, text, cls = '') => `<span class="chip ${cls}" onclick="location.hash='${href}'">${esc(text)}</span>`;
+
+function pushTrail(key, label) {
+  const i = trail.findIndex((t) => t.key === key);
+  if (i >= 0) trail = trail.slice(0, i + 1); else trail.push({ key, label, hash: location.hash });
+  if (trail.length > 12) trail.shift();
+  trailEl.innerHTML = trail.map((t, idx) => idx === trail.length - 1
+    ? `<b style="color:var(--text)">${esc(t.label)}</b>` : `<a href="${t.hash}">${esc(t.label)}</a>`).join(' <span>›</span> ');
+}
+
+// ---------- pages ----------
+async function showMovie(id) {
+  const m = await tmdb('/movie/' + id, { append_to_response: 'credits,recommendations' });
+  const directors = m.credits.crew.filter((c) => c.job === 'Director');
+  const writers = m.credits.crew.filter((c) => ['Screenplay', 'Writer'].includes(c.job)).slice(0, 4);
+  const cast = m.credits.cast.slice(0, 14);
+  pushTrail('movie' + id, m.title);
+  view.innerHTML = `
+    <div class="hero">
+      ${m.poster_path ? `<img src="${IMG}w342${m.poster_path}" alt="">` : ''}
+      <div>
+        <h2>${esc(m.title)}</h2>
+        <div class="meta">${chip('#/year/' + year(m.release_date), year(m.release_date), 'year')} · ${m.runtime || '?'} min · ★ ${m.vote_average?.toFixed(1)} (${m.vote_count} votes)</div>
+        <div class="overview">${esc(m.overview)}</div>
+        <div class="row"><span class="lbl">Director</span>${directors.map((d) => chip('#/person/' + d.id, d.name)).join('') || '—'}</div>
+        ${writers.length ? `<div class="row"><span class="lbl">Writers</span>${writers.map((d) => chip('#/person/' + d.id, d.name)).join('')}</div>` : ''}
+        <div class="row"><span class="lbl">Cast</span>${cast.map((c) => chip('#/person/' + c.id, c.name)).join('')}</div>
+        <div class="row"><span class="lbl">Studio</span>${m.production_companies.map((c) => chip('#/company/' + c.id, c.name)).join('') || '—'}</div>
+        <div class="row"><span class="lbl">Genres</span>${m.genres.map((g) => chip('#/genre/' + g.id + '/' + encodeURIComponent(g.name), g.name)).join('')}</div>
+        <button class="play" onclick="playOnKodi(${m.id}, ${JSON.stringify(m.title).replace(/"/g, '&quot;')})">▶ Play on Kodi</button>
+      </div>
+    </div>
+    <h3>More like this</h3>
+    <div class="grid">${m.recommendations.results.slice(0, 12).map((r) => card('#/movie/' + r.id, r.poster_path, r.title, year(r.release_date))).join('')}</div>`;
+}
+
+async function showPerson(id) {
+  const p = await tmdb('/person/' + id, { append_to_response: 'movie_credits' });
+  pushTrail('person' + id, p.name);
+  const cast = p.movie_credits.cast.filter((c) => c.release_date).sort((a, b) => b.vote_count - a.vote_count);
+  const crew = p.movie_credits.crew.filter((c) => c.release_date);
+  const directed = crew.filter((c) => c.job === 'Director').sort((a, b) => b.release_date.localeCompare(a.release_date));
+  const dedupe = (a) => [...new Map(a.map((x) => [x.id, x])).values()];
+  view.innerHTML = `
+    <div class="hero">
+      ${p.profile_path ? `<img src="${IMG}w342${p.profile_path}" alt="">` : ''}
+      <div><h2>${esc(p.name)}</h2>
+        <div class="meta">${esc(p.known_for_department || '')}${p.birthday ? ' · born ' + p.birthday : ''}${p.place_of_birth ? ' · ' + esc(p.place_of_birth) : ''}</div>
+        <div class="overview">${esc((p.biography || '').slice(0, 600))}${(p.biography || '').length > 600 ? '…' : ''}</div></div>
+    </div>
+    ${directed.length ? `<h3>Directed (${dedupe(directed).length})</h3><div class="grid">${dedupe(directed).map((c) => card('#/movie/' + c.id, c.poster_path, c.title, year(c.release_date))).join('')}</div>` : ''}
+    ${cast.length ? `<h3>Acted in (${dedupe(cast).length}, most-voted first)</h3><div class="grid">${dedupe(cast).slice(0, 40).map((c) => card('#/movie/' + c.id, c.poster_path, c.title, year(c.release_date) + (c.character ? ' · ' + c.character : ''))).join('')}</div>` : ''}`;
+}
+
+async function showList(key, label, heading, params, extraHead = '') {
+  pushTrail(key, label);
+  view.innerHTML = '<p class="msg">Loading…</p>';
+  const d = await tmdb('/discover/movie', { include_adult: 'false', ...params });
+  view.innerHTML = `${extraHead}<h3>${esc(heading)}</h3><div class="grid">${d.results.map((r) => card('#/movie/' + r.id, r.poster_path, r.title, year(r.release_date) + ' · ★' + r.vote_average.toFixed(1))).join('')}</div>`;
+}
+
+async function showCompany(id) {
+  const c = await tmdb('/company/' + id);
+  await showList('company' + id, c.name, `Top-rated films from ${c.name}`,
+    { with_companies: id, sort_by: 'vote_average.desc', 'vote_count.gte': 300 },
+    `<div class="hero"><div><h2>${esc(c.name)}</h2><div class="meta">${esc(c.origin_country || '')}${c.headquarters ? ' · ' + esc(c.headquarters) : ''}</div></div></div>`);
+}
+const showYear = (y) => showList('year' + y, y, `Highest-rated movies of ${y} (min. 500 votes)`,
+  { primary_release_year: y, sort_by: 'vote_average.desc', 'vote_count.gte': 500 },
+  `<div class="hero"><div><h2>${esc(y)}</h2></div></div>`);
+const showGenre = (id, name) => showList('genre' + id, name, `Highest-rated ${name} movies (min. 1000 votes)`,
+  { with_genres: id, sort_by: 'vote_average.desc', 'vote_count.gte': 1000 });
+
+async function showSearch(q) {
+  pushTrail('search' + q, 'Search: ' + q);
+  const d = await tmdb('/search/multi', { query: q, include_adult: 'false' });
+  const items = d.results.filter((r) => r.media_type === 'movie' || r.media_type === 'person');
+  view.innerHTML = items.length ? `<div class="grid">${items.map((r) => r.media_type === 'movie'
+    ? card('#/movie/' + r.id, r.poster_path, r.title, 'Movie · ' + year(r.release_date))
+    : card('#/person/' + r.id, r.profile_path, r.name, r.known_for_department)).join('')}</div>` : '<p class="msg">No results.</p>';
+}
+
+// ---------- Kodi ----------
+function toast(msg, ms = 4000) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), ms); }
+async function playOnKodi(tmdbId, title) {
+  toast('Sending "' + title + '" to Kodi…');
+  try {
+    const r = await fetch('/kodi/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tmdbId }) });
+    const j = await r.json();
+    toast(j.sent ? 'Sent to Kodi. Check your TV (Seren may ask you to pick a source).' : (j.error || 'Failed'), 6000);
+  } catch (e) { toast('Failed: ' + e.message, 6000); }
+}
+
+// ---------- router ----------
+async function route() {
+  const parts = location.hash.replace(/^#\//, '').split('/');
+  view.innerHTML = '<p class="msg">Loading…</p>';
+  try {
+    if (parts[0] === 'movie') await showMovie(parts[1]);
+    else if (parts[0] === 'person') await showPerson(parts[1]);
+    else if (parts[0] === 'company') await showCompany(parts[1]);
+    else if (parts[0] === 'year') await showYear(parts[1]);
+    else if (parts[0] === 'genre') await showGenre(parts[1], decodeURIComponent(parts[2] || 'Genre'));
+    else if (parts[0] === 'search') await showSearch(decodeURIComponent(parts[1]));
+    else view.innerHTML = '<p class="msg">Search for a movie or person to start exploring.</p>';
+    window.scrollTo(0, 0);
+  } catch (e) { view.innerHTML = '<p class="msg">Something went wrong: ' + esc(e.message) + '</p>'; }
+}
+window.addEventListener('hashchange', route);
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.value.trim()) location.hash = '#/search/' + encodeURIComponent(e.target.value.trim()); });
+$('#home').onclick = () => { trail = []; trailEl.innerHTML = ''; location.hash = ''; route(); };
+route();
+</script>
+</body>
+</html>
