@@ -13,7 +13,7 @@
   #q { flex:1; max-width:520px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:15px; }
   #trail { padding:8px 20px; color:var(--dim); font-size:13px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; border-bottom:1px solid var(--line); min-height:36px; }
   #trail a { color:var(--dim); cursor:pointer; text-decoration:none; } #trail a:hover { color:var(--text); }
-  main { padding:20px; max-width:1200px; margin:0 auto; }
+  main { padding:20px; max-width:1800px; margin:0 auto; }
   .hero { display:flex; gap:22px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:22px; }
   .hero img { width:170px; border-radius:8px; align-self:flex-start; background:#000; }
   .hero h2 { margin:0 0 4px; font-size:24px; }
@@ -33,6 +33,19 @@
   .card .t { font-size:13px; margin-top:5px; } .card .s { font-size:12px; color:var(--dim); }
   .noimg { aspect-ratio:2/3; border-radius:8px; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:12px; text-align:center; padding:6px; }
   #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; display:none; z-index:9; }
+  #alt { color:var(--dim); text-decoration:none; font-size:13px; border:1px solid var(--line); border-radius:999px; padding:5px 12px; white-space:nowrap; }
+  #alt:hover { color:var(--accent); border-color:var(--accent); }
+  .gwrap { overflow:auto; }
+  .gwrap svg.graph { display:block; height:calc(76vh * var(--z, 1)); width:auto; max-width:none; margin:0 auto; }
+  svg.graph .node { cursor:pointer; }
+  svg.graph .node:hover { filter:brightness(1.35); }
+  .gbar { display:flex; gap:18px; align-items:center; margin:0 auto 4px; min-height:44px; }
+  .gbar .overview { margin:0; font-size:13px; max-width:none; }
+  .gbar button.play { margin:0; white-space:nowrap; }
+  .zoom { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--dim); font-size:13px; white-space:nowrap; }
+  .zoom button { background:var(--chip); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 12px; font-size:15px; cursor:pointer; }
+  .zoom button:hover { border-color:var(--accent); color:var(--accent); }
+  .ghint { color:var(--dim); font-size:12px; margin-top:8px; text-align:center; }
   footer { color:var(--dim); font-size:12px; text-align:center; padding:30px 20px; }
   .msg { color:var(--dim); padding:30px 0; }
 </style>
@@ -41,12 +54,14 @@
 <header>
   <h1 id="home">&#9670; Kodi Explorer</h1>
   <input id="q" placeholder="Search a movie, actor, or director…" autocomplete="off">
+  <a id="alt" href="#" style="display:none"></a>
 </header>
 <div id="trail"></div>
 <main id="view"><p class="msg">Search for a movie or person to start exploring.</p></main>
 <div id="toast"></div>
 <footer>This product uses the TMDB API but is not endorsed or certified by TMDB. Data and images from The Movie Database (themoviedb.org).</footer>
 
+<script src="graph.js"></script>
 <script>
 const IMG = 'https://image.tmdb.org/t/p/';
 const $ = (s) => document.querySelector(s);
@@ -146,8 +161,8 @@ async function showSearch(q) {
   const d = await tmdb('/search/multi', { query: q, include_adult: 'false' });
   const items = d.results.filter((r) => r.media_type === 'movie' || r.media_type === 'person');
   view.innerHTML = items.length ? `<div class="grid">${items.map((r) => r.media_type === 'movie'
-    ? card('#/movie/' + r.id, r.poster_path, r.title, 'Movie · ' + year(r.release_date))
-    : card('#/person/' + r.id, r.profile_path, r.name, r.known_for_department)).join('')}</div>` : '<p class="msg">No results.</p>';
+    ? card('#/g/movie/' + r.id, r.poster_path, r.title, 'Movie · ' + year(r.release_date))
+    : card('#/g/person/' + r.id, r.profile_path, r.name, r.known_for_department)).join('')}</div>` : '<p class="msg">No results.</p>';
 }
 
 // ---------- Kodi ----------
@@ -165,8 +180,14 @@ async function playOnKodi(tmdbId, title) {
 async function route() {
   const parts = location.hash.replace(/^#\//, '').split('/');
   view.innerHTML = '<p class="msg">Loading…</p>';
+  // toggle between the graph view and the list view of the same item
+  const alt = $('#alt');
+  if (parts[0] === 'g' && parts[1]) { alt.textContent = '☰ List view'; alt.href = '#/' + parts.slice(1).join('/'); alt.style.display = ''; }
+  else if (['movie', 'person', 'company', 'year', 'genre'].includes(parts[0])) { alt.textContent = '◇ Graph view'; alt.href = '#/g/' + parts.join('/'); alt.style.display = ''; }
+  else alt.style.display = 'none';
   try {
-    if (parts[0] === 'movie') await showMovie(parts[1]);
+    if (parts[0] === 'g') await showGraph(parts[1], parts[2], decodeURIComponent(parts[3] || ''));
+    else if (parts[0] === 'movie') await showMovie(parts[1]);
     else if (parts[0] === 'person') await showPerson(parts[1]);
     else if (parts[0] === 'company') await showCompany(parts[1]);
     else if (parts[0] === 'year') await showYear(parts[1]);

@@ -4,11 +4,25 @@ A personal movie discovery tool. Start from any movie or person, click through
 directors, cast, studios, years and genres, and press **Play on Kodi** to start
 playback in Kodi (via TMDb Helper and Seren).
 
-Status: Phase 1 prototype (clickable directory with a breadcrumb trail). A radial
-graph view is planned.
+Status: working prototype with a radial graph view and a list view. Browsing and
+Play on Kodi verified end to end on macOS with Kodi 21.
 
 Data and images: this product uses the TMDB API but is not endorsed or certified
 by TMDB. Movie data is provided by [The Movie Database](https://www.themoviedb.org).
+
+## Using it
+
+- Search for a movie or person. Results open in the **graph view**: the item sits in the
+  centre and its connections (director, cast, studios, year, genres, or a person's films)
+  sit on a ring.
+- Click any node to re-centre the graph on it. The breadcrumb trail shows where you have been.
+- Click **+N more** to expand a group (for example the rest of the cast).
+- **Play on Kodi** appears on movie pages.
+- **Size:** the graph starts in **Fit** mode (largest size that fits your window). Use **A+ / A−** in the
+  bar above the graph, or the **+ / −** keys, to make everything larger or smaller. Larger sizes
+  scroll sideways. **Fit** returns to the default. Your choice is remembered in the browser.
+- The **List view / Graph view** button in the header switches between the two views of the
+  same item.
 
 ## Requirements
 
