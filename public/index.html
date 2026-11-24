@@ -34,11 +34,19 @@
   .noimg { aspect-ratio:2/3; border-radius:8px; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:12px; text-align:center; padding:6px; }
   .homehead { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
   .homehead h2 { margin:0 0 4px; font-size:20px; } .homesub { margin:0; color:var(--dim); font-size:14px; max-width:640px; }
+  .hometabs { display:inline-flex; gap:4px; margin:2px 0 8px; background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:3px; }
+  .hometabs button { background:none; color:var(--dim); border:0; border-radius:999px; padding:6px 16px; font-size:14px; cursor:pointer; }
+  .hometabs button.on { background:var(--accent); color:#1a1300; font-weight:700; }
+  .hometabs button:not(.on):hover { color:var(--text); }
   button.shuffle { background:var(--chip); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 16px; font-size:15px; cursor:pointer; white-space:nowrap; }
   button.shuffle:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); } button.shuffle:disabled { opacity:.6; cursor:default; }
   .homegrid { transition:opacity .15s; } .homegrid .card { animation:cardin .35s ease both; }
   @keyframes cardin { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
   @media (prefers-reduced-motion: reduce) { .homegrid .card { animation:none; } }
+  .tvrow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:6px; } .tvrow button.alt { margin:0; }
+  .tvplay { display:inline-flex; flex-wrap:wrap; align-items:center; gap:8px; } .tvplay button.play { margin:0; } .tvnone { color:var(--dim); font-size:14px; }
+  .tvplay select { background:var(--chip); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:14px; }
+  .gbar .tvplay { white-space:nowrap; }
   #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; display:none; z-index:9; }
   #alt { color:var(--dim); text-decoration:none; font-size:13px; border:1px solid var(--line); border-radius:999px; padding:5px 12px; white-space:nowrap; }
   #alt:hover { color:var(--accent); border-color:var(--accent); }
@@ -87,7 +95,7 @@
 <body>
 <header>
   <h1 id="home">&#9670; Kodi Explorer</h1>
-  <input id="q" placeholder="Search a movie, actor, or director…" autocomplete="off">
+  <input id="q" placeholder="Search a movie, TV show, actor, or director…" autocomplete="off">
   <a id="alt" href="#" style="display:none"></a>
 </header>
 <div id="trail"></div>
@@ -97,6 +105,7 @@
 
 <script src="graph.js"></script>
 <script src="details.js"></script>
+<script src="tv.js"></script>
 <script src="home.js"></script>
 <script>
 const IMG = 'https://image.tmdb.org/t/p/';
@@ -156,12 +165,15 @@ async function showMovie(id) {
 }
 
 async function showPerson(id) {
-  const p = await tmdb('/person/' + id, { append_to_response: 'movie_credits' });
+  const p = await tmdb('/person/' + id, { append_to_response: 'movie_credits,tv_credits' });
   pushTrail('person' + id, p.name);
   const cast = p.movie_credits.cast.filter((c) => c.release_date).sort((a, b) => b.vote_count - a.vote_count);
   const crew = p.movie_credits.crew.filter((c) => c.release_date);
   const directed = crew.filter((c) => c.job === 'Director').sort((a, b) => b.release_date.localeCompare(a.release_date));
   const dedupe = (a) => [...new Map(a.map((x) => [x.id, x])).values()];
+  const tvc = p.tv_credits || { cast: [], crew: [] };
+  const createdTv = dedupe(tvc.crew.filter((c) => c.job === 'Creator' && c.first_air_date)).sort((a, b) => b.first_air_date.localeCompare(a.first_air_date));
+  const onTv = dedupe(tvc.cast.filter((c) => c.first_air_date && !(c.genre_ids || []).some((g) => g === 10767 || g === 10763))).sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0));
   view.innerHTML = `
     <div class="hero">
       ${p.profile_path ? `<img src="${IMG}w342${p.profile_path}" alt="">` : ''}
@@ -170,7 +182,9 @@ async function showPerson(id) {
         <div class="overview">${esc((p.biography || '').slice(0, 600))}${(p.biography || '').length > 600 ? '…' : ''}</div></div>
     </div>
     ${directed.length ? `<h3>Directed (${dedupe(directed).length})</h3><div class="grid">${dedupe(directed).map((c) => card('#/movie/' + c.id, c.poster_path, c.title, year(c.release_date))).join('')}</div>` : ''}
-    ${cast.length ? `<h3>Acted in (${dedupe(cast).length}, most-voted first)</h3><div class="grid">${dedupe(cast).slice(0, 40).map((c) => card('#/movie/' + c.id, c.poster_path, c.title, year(c.release_date) + (c.character ? ' · ' + c.character : ''))).join('')}</div>` : ''}`;
+    ${cast.length ? `<h3>Acted in (${dedupe(cast).length}, most-voted first)</h3><div class="grid">${dedupe(cast).slice(0, 40).map((c) => card('#/movie/' + c.id, c.poster_path, c.title, year(c.release_date) + (c.character ? ' · ' + c.character : ''))).join('')}</div>` : ''}
+    ${createdTv.length ? `<h3>Created (${createdTv.length} TV)</h3><div class="grid">${createdTv.map(tvCard).join('')}</div>` : ''}
+    ${onTv.length ? `<h3>On TV (${onTv.length}, most-voted first)</h3><div class="grid">${onTv.slice(0, 40).map((c) => card('#/g/tv/' + c.id, c.poster_path, c.name, year(c.first_air_date) + (c.character ? ' · ' + c.character : ''))).join('')}</div>` : ''}`;
 }
 
 async function showList(key, label, heading, params, extraHead = '') {
@@ -195,20 +209,21 @@ const showGenre = (id, name) => showList('genre' + id, name, `Highest-rated ${na
 async function showSearch(q) {
   pushTrail('search' + q, 'Search: ' + q);
   const d = await tmdb('/search/multi', { query: q, include_adult: 'false' });
-  const items = d.results.filter((r) => r.media_type === 'movie' || r.media_type === 'person');
+  const items = d.results.filter((r) => r.media_type === 'movie' || r.media_type === 'tv' || r.media_type === 'person');
   view.innerHTML = items.length ? `<div class="grid">${items.map((r) => r.media_type === 'movie'
     ? card('#/g/movie/' + r.id, r.poster_path, r.title, 'Movie · ' + year(r.release_date))
+    : r.media_type === 'tv' ? card('#/g/tv/' + r.id, r.poster_path, r.name, 'TV · ' + year(r.first_air_date))
     : card('#/g/person/' + r.id, r.profile_path, r.name, r.known_for_department)).join('')}</div>` : '<p class="msg">No results.</p>';
 }
 
 // ---------- Kodi ----------
 function toast(msg, ms = 4000) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), ms); }
-async function playOnKodi(tmdbId, title) {
+async function playOnKodi(tmdbId, title, extra = {}) {
   toast('Sending "' + title + '" to Kodi…');
   // If Kodi is not open the server starts it and waits for it, which can take up to a minute.
   const slow = setTimeout(() => toast('Waiting for Kodi to start… this can take up to a minute.', 95000), 3000);
   try {
-    const r = await fetch('/kodi/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tmdbId }) });
+    const r = await fetch('/kodi/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tmdbId, ...extra }) });
     const j = await r.json();
     toast(j.sent ? 'Sent to Kodi. Switch to the Kodi window and choose a source.' : (j.error || 'Failed'), 6000);
   } catch (e) { toast('Failed: ' + e.message, 6000); }
@@ -224,7 +239,7 @@ async function route() {
   // toggle between the graph view and the list view of the same item
   const alt = $('#alt');
   if (parts[0] === 'g' && parts[1]) { alt.textContent = '☰ List view'; alt.href = '#/' + parts.slice(1).join('/'); alt.style.display = ''; }
-  else if (['movie', 'person', 'company', 'year', 'genre'].includes(parts[0])) { alt.textContent = '◇ Graph view'; alt.href = '#/g/' + parts.join('/'); alt.style.display = ''; }
+  else if (['movie', 'person', 'company', 'year', 'genre', 'tv', 'network', 'tvyear', 'tvgenre'].includes(parts[0])) { alt.textContent = '◇ Graph view'; alt.href = '#/g/' + parts.join('/'); alt.style.display = ''; }
   else alt.style.display = 'none';
   try {
     if (parts[0] === 'g') await showGraph(parts[1], parts[2], decodeURIComponent(parts[3] || ''));
@@ -233,6 +248,10 @@ async function route() {
     else if (parts[0] === 'company') await showCompany(parts[1]);
     else if (parts[0] === 'year') await showYear(parts[1]);
     else if (parts[0] === 'genre') await showGenre(parts[1], decodeURIComponent(parts[2] || 'Genre'));
+    else if (parts[0] === 'tv') await showTv(parts[1]);
+    else if (parts[0] === 'network') await showNetwork(parts[1]);
+    else if (parts[0] === 'tvyear') await showTvYear(parts[1]);
+    else if (parts[0] === 'tvgenre') await showTvGenre(parts[1], decodeURIComponent(parts[2] || 'Genre'));
     else if (parts[0] === 'search') await showSearch(decodeURIComponent(parts[1]));
     else await showHome();
     window.scrollTo(0, 0);

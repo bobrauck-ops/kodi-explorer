@@ -1,10 +1,12 @@
 // Radial "focus" graph view for Kodi Explorer.
-// The selected movie/person/studio/year/genre sits in the centre; its connections sit on a ring,
+// The selected movie/TV show/person/studio/network/year/genre sits in the centre; its connections sit on a ring,
 // grouped (Director, Cast, Studio, Year, Genre...). Click a node to re-centre on it.
 // Relies on globals defined in index.html: tmdb, IMG, view, esc, year, pushTrail, playOnKodi.
 
 const GRAPH = { cache: {}, expanded: {}, current: null };
-const COLORS = { movie: '#f5b83d', person: '#6cb6ff', company: '#b78bff', year: '#ff8f6b', genre: '#5fd1a5', more: '#8b92a6' };
+const COLORS = { movie: '#f5b83d', tv: '#ff7eb6', person: '#6cb6ff', company: '#b78bff', network: '#b78bff', year: '#ff8f6b', tvyear: '#ff8f6b', genre: '#5fd1a5', tvgenre: '#5fd1a5', more: '#8b92a6' };
+// Movies and TV shows are both drawn as posters; everything else about them differs only in colour.
+const isPoster = (k) => k === 'movie' || k === 'tv';
 
 const dedupe = (arr) => [...new Map(arr.map((x) => [x.id, x])).values()];
 const short = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
@@ -14,12 +16,24 @@ const movieNode = (r, sub) => ({
   kind: 'movie', label: r.title, img: r.poster_path, href: '#/g/movie/' + r.id,
   sub: sub !== undefined ? sub : year(r.release_date) + (r.vote_average ? ' · ★' + r.vote_average.toFixed(1) : ''),
 });
+const tvNode = (r, sub) => ({
+  kind: 'tv', label: r.name, img: r.poster_path, href: '#/g/tv/' + r.id,
+  sub: sub !== undefined ? sub : year(r.first_air_date) + (r.vote_average ? ' · ★' + r.vote_average.toFixed(1) : ''),
+});
 const personNode = (id, name, img, sub) => ({ kind: 'person', label: name, img, sub: sub || '', href: '#/g/person/' + id });
 
 async function discoverMovies(params) {
   const d = await tmdb('/discover/movie', { include_adult: 'false', ...params });
   return d.results;
 }
+
+async function discoverTv(params) {
+  const d = await tmdb('/discover/tv', { include_adult: 'false', ...params });
+  return d.results;
+}
+const seasonsText = (n) => (n ? n + ' season' + (n > 1 ? 's' : '') : '');
+// Talk shows and news programmes list actors as guests; leave them out of someone's "TV" credits.
+const isGuestShow = (c) => (c.genre_ids || []).some((g) => g === 10767 || g === 10763);
 
 // ---------- data: build the "focus" object for any node type ----------
 async function loadFocus(type, id, name) {
@@ -44,9 +58,12 @@ async function loadFocus(type, id, name) {
       ],
     };
   } else if (type === 'person') {
-    const p = await tmdb('/person/' + id, { append_to_response: 'movie_credits' });
+    const p = await tmdb('/person/' + id, { append_to_response: 'movie_credits,tv_credits' });
     const directed = dedupe(p.movie_credits.crew.filter((c) => c.job === 'Director' && c.release_date)).sort(byVotes);
     const acted = dedupe(p.movie_credits.cast.filter((c) => c.release_date)).sort(byVotes);
+    const tvc = p.tv_credits || { cast: [], crew: [] };
+    const onTv = dedupe(tvc.cast.filter((c) => c.first_air_date && !isGuestShow(c))).sort(byVotes);
+    const created = dedupe(tvc.crew.filter((c) => c.job === 'Creator' && c.first_air_date)).sort(byVotes);
     f = {
       type, id, title: p.name, img: p.profile_path, listHref: '#/person/' + id,
       sub: [p.known_for_department, p.birthday ? 'born ' + year(p.birthday) : ''].filter(Boolean).join(' · '),
@@ -57,6 +74,9 @@ async function loadFocus(type, id, name) {
       ],
     };
     if (p.known_for_department !== 'Directing' && f.groups[0].items.length && f.groups[1].items.length) f.groups.reverse();
+    f.groups.push(
+      { key: 'created', label: 'Created', initial: 4, items: created.slice(0, 8).map((c) => tvNode(c)) },
+      { key: 'ontv', label: 'On TV', initial: 5, items: onTv.slice(0, 12).map((c) => tvNode(c, year(c.first_air_date) + (c.character ? ' · ' + c.character : ''))) });
   } else if (type === 'company') {
     const c = await tmdb('/company/' + id);
     const films = await discoverMovies({ with_companies: id, sort_by: 'vote_average.desc', 'vote_count.gte': 300 });
@@ -79,6 +99,44 @@ async function loadFocus(type, id, name) {
       overview: 'Highest-rated ' + (name || '') + ' movies (minimum 1000 votes).',
       groups: [{ key: 'films', label: 'Top ' + (name || 'films'), initial: 8, items: films.slice(0, 14).map((r) => movieNode(r)) }],
     };
+  } else if (type === 'tv') {
+    const t = await tmdb('/tv/' + id, { append_to_response: 'aggregate_credits' });
+    const y = year(t.first_air_date), y2 = year(t.last_air_date);
+    const span = !y ? '' : t.in_production ? y + '–' : y2 && y2 !== y ? y + '–' + y2 : y;
+    f = {
+      type, id, title: t.name, img: t.poster_path, tmdbId: t.id, listHref: '#/tv/' + id, seasons: t.seasons || [],
+      sub: [span, seasonsText(t.number_of_seasons), t.vote_average ? '★ ' + t.vote_average.toFixed(1) : ''].filter(Boolean).join(' · '),
+      overview: t.overview,
+      groups: [
+        { key: 'creator', label: 'Creator', items: (t.created_by || []).map((d) => personNode(d.id, d.name, d.profile_path, 'Creator')) },
+        { key: 'cast', label: 'Cast', initial: 6, items: ((t.aggregate_credits && t.aggregate_credits.cast) || []).slice(0, 12).map((c) => personNode(c.id, c.name, c.profile_path, (c.roles && c.roles[0] && c.roles[0].character) || '')) },
+        { key: 'network', label: 'Network', initial: 3, items: (t.networks || []).slice(0, 6).map((n) => ({ kind: 'company', label: n.name, href: '#/g/network/' + n.id })) },
+        { key: 'year', label: 'Year', items: y ? [{ kind: 'year', label: y, href: '#/g/tvyear/' + y }] : [] },
+        { key: 'genre', label: 'Genre', initial: 2, items: (t.genres || []).map((g) => ({ kind: 'genre', label: g.name, href: '#/g/tvgenre/' + g.id + '/' + encodeURIComponent(g.name) })) },
+      ],
+    };
+  } else if (type === 'network') {
+    const n = await tmdb('/network/' + id);
+    const shows = await discoverTv({ with_networks: id, sort_by: 'vote_average.desc', 'vote_count.gte': 300 });
+    f = {
+      type, id, title: n.name, listHref: '#/network/' + id, sub: [n.origin_country, n.headquarters].filter(Boolean).join(' · '),
+      overview: 'Top-rated TV shows from this network (minimum 300 votes).',
+      groups: [{ key: 'shows', label: 'Top shows', initial: 8, items: shows.slice(0, 14).map((r) => tvNode(r)) }],
+    };
+  } else if (type === 'tvyear') {
+    const shows = await discoverTv({ first_air_date_year: id, sort_by: 'vote_average.desc', 'vote_count.gte': 200 });
+    f = {
+      type, id, title: String(id), listHref: '#/tvyear/' + id, sub: 'First aired',
+      overview: 'Highest-rated TV shows that first aired in ' + id + ' (minimum 200 votes).',
+      groups: [{ key: 'shows', label: 'Best of ' + id, initial: 8, items: shows.slice(0, 14).map((r) => tvNode(r)) }],
+    };
+  } else if (type === 'tvgenre') {
+    const shows = await discoverTv({ with_genres: id, sort_by: 'vote_average.desc', 'vote_count.gte': 500 });
+    f = {
+      type, id, title: name || 'Genre', listHref: '#/tvgenre/' + id + '/' + encodeURIComponent(name || 'Genre'), sub: 'TV genre',
+      overview: 'Highest-rated ' + (name || '') + ' TV shows (minimum 500 votes).',
+      groups: [{ key: 'shows', label: 'Top ' + (name || 'shows'), initial: 8, items: shows.slice(0, 14).map((r) => tvNode(r)) }],
+    };
   } else {
     throw new Error('Unknown node type');
   }
@@ -89,7 +147,7 @@ async function loadFocus(type, id, name) {
 // ---------- drawing ----------
 // Sizes are in SVG units; the whole graph is then scaled by the zoom setting (see graphZoom).
 function nodeSize(n, scale = 1) {
-  if (n.kind === 'movie') return { w: 74 * scale, h: 111 * scale };
+  if (isPoster(n.kind)) return { w: 74 * scale, h: 111 * scale };
   if (n.kind === 'person') return { w: 84 * scale, h: 84 * scale };
   return { w: Math.min(236, Math.max(92, n.label.length * 9.2 + 34)), h: 38 };
 }
@@ -101,7 +159,7 @@ function drawNode(n, x, y, scale = 1, noCaption = false, side = 'below') {
   const col = COLORS[n.kind] || '#888';
   const id = 'clip' + ++gradId;
   let shape = '';
-  if (n.kind === 'movie') {
+  if (isPoster(n.kind)) {
     shape = `<clipPath id="${id}"><rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="8"/></clipPath>
       <rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="8" fill="#1b1e27"/>
       ${n.img ? `<image href="${IMG}w342${n.img}" x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${id})"/>`
@@ -119,7 +177,7 @@ function drawNode(n, x, y, scale = 1, noCaption = false, side = 'below') {
       <text x="${x}" y="${y + 5.5}" text-anchor="middle" fill="${n.kind === 'more' ? '#c9cede' : col}" font-size="16">${esc(short(n.label, 22))}</text>`;
   }
   let caption = '';
-  if (!noCaption && (n.kind === 'movie' || n.kind === 'person')) {
+  if (!noCaption && (isPoster(n.kind) || n.kind === 'person')) {
     let tx = x, ty = y + h / 2 + 20, anchor = 'middle', sy = y + h / 2 + 38;
     if (side === 'right') { tx = x + w / 2 + 10; anchor = 'start'; ty = y - 2; sy = y + 18; }
     if (side === 'left') { tx = x - w / 2 - 10; anchor = 'end'; ty = y - 2; sy = y + 18; }
@@ -135,8 +193,8 @@ function drawNode(n, x, y, scale = 1, noCaption = false, side = 'below') {
 function drawCenter(f, cx, cy) {
   const col = COLORS[f.type] || '#888';
   let shape, halfW, bottom;
-  if (f.type === 'movie') {
-    shape = drawNode({ kind: 'movie', label: f.title, img: f.img }, cx, cy, 130 / 74, true);
+  if (isPoster(f.type)) {
+    shape = drawNode({ kind: f.type, label: f.title, img: f.img }, cx, cy, 130 / 74, true);
     halfW = 65; bottom = cy + 97.5;
   } else if (f.type === 'person') {
     shape = drawNode({ kind: 'person', label: f.title, img: f.img }, cx, cy, 1.9, true);
@@ -151,7 +209,7 @@ function drawCenter(f, cx, cy) {
     <text x="${cx}" y="${bottom + 28}" text-anchor="middle" fill="#fff" font-size="22" font-weight="700" stroke="#12141a" stroke-width="5" paint-order="stroke">${esc(title)}</text>
     <text x="${cx}" y="${bottom + 50}" text-anchor="middle" fill="#9aa1b5" font-size="15" stroke="#12141a" stroke-width="4" paint-order="stroke">${esc(sub)}</text></g></g>`;
   const halfLabel = Math.max(halfW, title.length * 6.2, sub.length * 4.2);
-  return { svg, box: [cx - halfLabel, cy - (f.type === 'movie' ? 97.5 : f.type === 'person' ? 80 : 72), cx + halfLabel, bottom + 58] };
+  return { svg, box: [cx - halfLabel, cy - (isPoster(f.type) ? 97.5 : f.type === 'person' ? 80 : 72), cx + halfLabel, bottom + 58] };
 }
 
 // Points evenly spaced by ARC LENGTH around an ellipse (equal angles would bunch nodes up at the sides).
@@ -187,7 +245,7 @@ function graphSvg(f) {
     return { ...g, list };
   });
   // Each node takes up room on the ring: wide pills need more than a poster or portrait.
-  const weight = (n) => (n.kind === 'movie' || n.kind === 'person' ? 1.3 : Math.max(1, nodeSize(n).w / 115));
+  const weight = (n) => (isPoster(n.kind) || n.kind === 'person' ? 1.3 : Math.max(1, nodeSize(n).w / 115));
   const GAP = 0.9;
   const total = groups.reduce((s, g) => s + g.list.reduce((t, n) => t + weight(n), 0) + GAP, 0) || 1;
   // Grow the ring when there are many nodes so labels don't collide.
@@ -208,7 +266,7 @@ function graphSvg(f) {
       const side = dx > 0.5 * rx ? 'right' : dx < -0.5 * rx ? 'left' : 'below';
       nodes.push([n, x, y, side]);
       const sz = nodeSize(n);
-      const hasCap = (n.kind === 'movie' || n.kind === 'person');
+      const hasCap = (isPoster(n.kind) || n.kind === 'person');
       const cw = hasCap ? capWidth(n) : 0;
       let x0 = x - sz.w / 2, x1 = x + sz.w / 2, y0 = y - sz.h / 2, y1 = y + sz.h / 2;
       if (hasCap) {
@@ -321,7 +379,8 @@ function leaveGraph(nodeEl) {
     const pt = svg.createSVGPoint(); pt.x = 0; pt.y = 0;
     const c = pt.matrixTransform(ctm);                       // where the centre node sits on screen
     const r = shape.getBoundingClientRect();
-    const kind = nodeEl.dataset.kind === 'movie' || nodeEl.dataset.kind === 'person' ? nodeEl.dataset.kind : 'other';
+    const dk = nodeEl.dataset.kind === 'tv' ? 'movie' : nodeEl.dataset.kind;   // a TV poster travels like a movie poster
+    const kind = dk === 'movie' || dk === 'person' ? dk : 'other';
     const s = CENTER_SCALE[kind];
     const dx = (c.x - (r.left + r.width / 2)) / ctm.a, dy = (c.y - (r.top + r.height / 2)) / ctm.a;
     const anims = [];
@@ -401,7 +460,9 @@ function renderGraphPage(opts) {
   const aspect = vb ? +vb[3] / +vb[4] : 1.6;
   GRAPH.fitZ = fitZoom(aspect);
   const z = effectiveZoom();
-  const play = f.type === 'movie'
+  const play = f.type === 'tv'
+    ? tvPlayHtml('g', f.tmdbId, f.title, f.seasons) + `<button class="alt" onclick="openDetails(${f.tmdbId}, 'tv')">ℹ Details &amp; trailer</button>`
+    : f.type === 'movie'
     ? `<button class="play" onclick="playOnKodi(${f.tmdbId}, ${JSON.stringify(f.title).replace(/"/g, '&quot;')})">▶ Play on Kodi</button><button class="alt" onclick="openDetails(${f.tmdbId})">ℹ Details &amp; trailer</button>` : '';
   view.innerHTML = `<div class="gbar">${play}<div class="overview">${esc(short(f.overview || '', 240))}</div>
       <div class="zoom"><button onclick="graphZoom(-1)" title="Smaller (−)">A−</button><span>${GRAPH.zoom === 'fit' ? 'Fit' : Math.round(z * 100) + '%'}</span><button onclick="graphZoom(1)" title="Larger (+)">A+</button>${GRAPH.zoom === 'fit' ? '' : '<button onclick="setZoom(\'fit\')" title="Fit to window">Fit</button>'}<button onclick="toggleMotion()" title="Animate moving between nodes">Motion: ${GRAPH.motion ? 'on' : 'off'}</button></div></div>
@@ -420,7 +481,7 @@ async function showGraph(type, id, name) {
   const leaving = GRAPH.leaving && Date.now() - GRAPH.leavingAt < 5000 ? GRAPH.leaving : null;
   const handoff = leaving ? GRAPH.handoff : null;
   GRAPH.leaving = null; GRAPH.handoff = null;
-  const ok = type === 'year' ? /^\d{4}$/.test(id) : /^\d+$/.test(id);
+  const ok = type === 'year' || type === 'tvyear' ? /^\d{4}$/.test(id) : /^\d+$/.test(id);
   if (!ok) { view.innerHTML = '<p class="msg">Not a valid item.</p>'; return; }
   let f;
   try { [f] = await Promise.all([loadFocus(type, id, name), leaving]); }

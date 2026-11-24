@@ -27,8 +27,34 @@ function fullDate(d) {
   return isNaN(t) ? d : t.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-async function loadDetails(id) {
-  if (DETAILS.cache[id]) return DETAILS.cache[id];
+function tvCertification(cr) {
+  const us = ((cr && cr.results) || []).find((r) => r.iso_3166_1 === 'US');
+  return us ? us.rating || '' : '';
+}
+
+async function loadDetailsTv(id) {
+  const t = await tmdb('/tv/' + id, { append_to_response: 'videos,content_ratings' });
+  const n = t.number_of_seasons, e = t.number_of_episodes;
+  const rt = (t.episode_run_time && t.episode_run_time[0]) || 0;
+  return {
+    type: 'tv', id: t.id, title: t.name, tagline: t.tagline, overview: t.overview,
+    released: fullDate(t.first_air_date), lastAired: t.in_production ? '' : fullDate(t.last_air_date),
+    seasonsText: [n ? n + ' season' + (n > 1 ? 's' : '') : '', e ? e + ' episodes' : ''].filter(Boolean).join(' · '),
+    runtime: rt, cert: tvCertification(t.content_ratings),
+    score: t.vote_average, votes: t.vote_count, status: t.status,
+    language: langName(t.original_language),
+    countries: (t.production_countries || []).map((c) => c.name),
+    network: (t.networks || []).map((x) => x.name).join(', '),
+    creators: (t.created_by || []).map((x) => x.name).join(', '),
+    seasons: t.seasons || [],
+    videos: pickVideos(t.videos && t.videos.results),
+  };
+}
+
+async function loadDetails(id, type) {
+  const ck = (type === 'tv' ? 'tv' : 'movie') + id;
+  if (DETAILS.cache[ck]) return DETAILS.cache[ck];
+  if (type === 'tv') return (DETAILS.cache[ck] = await loadDetailsTv(id));
   const m = await tmdb('/movie/' + id, { append_to_response: 'videos,release_dates' });
   const d = {
     id: m.id, title: m.title, tagline: m.tagline, overview: m.overview,
@@ -39,7 +65,7 @@ async function loadDetails(id) {
     budget: money(m.budget), revenue: money(m.revenue),
     videos: pickVideos(m.videos && m.videos.results),
   };
-  DETAILS.cache[id] = d;
+  DETAILS.cache[ck] = d;
   return d;
 }
 
@@ -55,8 +81,8 @@ function ensureDialog() {
   return el;
 }
 
-function videoHtml(v, autoplay) {
-  if (!v) return '<div class="vid novid"><div>No trailer listed on TMDB for this movie.</div></div>';
+function videoHtml(v, autoplay, kind) {
+  if (!v) return `<div class="vid novid"><div>No trailer listed on TMDB for this ${kind || 'movie'}.</div></div>`;
   if (autoplay) {
     return `<div class="vid"><iframe src="https://www.youtube-nocookie.com/embed/${v.key}?autoplay=1&rel=0" title="${esc(v.name)}"
       allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`;
@@ -68,7 +94,9 @@ function videoHtml(v, autoplay) {
 function renderDetails(d, vidKey, autoplay) {
   const v = d.videos.find((x) => x.key === vidKey) || d.videos[0];
   const rows = [
-    ['Released', d.released], ['Runtime', d.runtime ? d.runtime + ' min' : ''], ['Rated', d.cert],
+    d.type === 'tv' ? ['First aired', d.released] : ['Released', d.released],
+    ['Last aired', d.lastAired], ['Seasons', d.seasonsText], ['Created by', d.creators], ['Network', d.network],
+    [d.type === 'tv' ? 'Episode length' : 'Runtime', d.runtime ? d.runtime + ' min' : ''], ['Rated', d.cert],
     ['Score', d.score ? '★ ' + d.score.toFixed(1) + (d.votes ? ' (' + d.votes.toLocaleString('en-US') + ' votes)' : '') : ''],
     ['Language', d.language], ['Made in', d.countries.join(', ')], ['Status', d.status],
     ['Budget', d.budget], ['Box office', d.revenue],
@@ -81,26 +109,27 @@ function renderDetails(d, vidKey, autoplay) {
     <h2 class="dtitle">${esc(d.title)}</h2>
     ${d.tagline ? `<div class="dtag">${esc(d.tagline)}</div>` : ''}
     <div class="dgrid">
-      <div>${videoHtml(v, autoplay)}${others}</div>
+      <div>${videoHtml(v, autoplay, d.type === 'tv' ? 'show' : 'movie')}${others}</div>
       <div>
         <div class="dover">${esc(d.overview || 'No overview available.')}</div>
         <dl class="dl">${rows.map((r) => `<dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd>`).join('')}</dl>
-        <button class="play" id="dplay">▶ Play on Kodi</button>
+        ${d.type === 'tv' ? `<div class="tvrow">${tvPlayHtml('d', d.id, d.title, d.seasons)}</div>` : '<button class="play" id="dplay">▶ Play on Kodi</button>'}
       </div>
     </div>
     <div class="dcredit">Trailers play from YouTube. Details from TMDB.</div>
   </div>`;
   document.getElementById('dclose').onclick = closeDetails;
-  document.getElementById('dplay').onclick = () => { closeDetails(); playOnKodi(d.id, d.title); }; // close first: stops the trailer and keeps the toast visible
+  const dp = document.getElementById('dplay');
+  if (dp) dp.onclick = () => { closeDetails(); playOnKodi(d.id, d.title); }; // close first: stops the trailer and keeps the toast visible (TV: see playTv)
 }
 
-async function openDetails(id) {
+async function openDetails(id, type) {
   const el = ensureDialog();
   DETAILS.open = true;
   el.classList.add('open');
   el.innerHTML = '<div class="dbox"><p class="msg">Loading…</p></div>';
   try {
-    const d = await loadDetails(id);
+    const d = await loadDetails(id, type);
     if (!DETAILS.open) return; // closed while loading
     DETAILS.current = d;
     renderDetails(d, null, false);

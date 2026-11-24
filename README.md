@@ -17,7 +17,11 @@ by TMDB. Movie data is provided by [The Movie Database](https://www.themoviedb.o
   sit on a ring.
 - Click any node to re-centre the graph on it. The breadcrumb trail shows where you have been.
 - Click **+N more** to expand a group (for example the rest of the cast).
-- **Home page:** opening the app shows 30 random films rated 7.5 or higher by at least 1,000 people.
+- **TV shows:** search finds shows as well as films. A show's graph has its creator, cast, network, first-aired
+  year and genres (click a network, year or genre to see more shows). Actors and creators also list their TV
+  work (talk shows and news programmes are left out). Pick a **season and episode** next to Play, then
+  **Play on Kodi**. The Details panel has the show's trailer.
+- **Home page:** use the **Movies / TV shows** tabs. Opening the app shows 30 random films rated 7.5 or higher by at least 1,000 people.
   Click a poster to explore it. The selection is new every time the app is opened or reloaded, and
   **New selection** draws another 30 (avoiding films already shown that session). Going back or
   clicking the logo keeps the current selection. To make the picks more or less famous, change
@@ -101,6 +105,13 @@ Then make Seren the default so Kodi skips TMDb Helper's player-choice dialog:
 3. Click the default player for **Movies** and choose **Seren**. Leave the TV default alone
    (the supplied `seren.json` only handles movies).
 4. Press OK.
+
+### TV shows: one more Kodi step
+
+Do the same two things for episodes: copy `docs/seren.json` again (it now also has an episode entry), then in
+TMDb Helper's **Players** settings set the default player for **episodes** to Seren. The episode entry is based on
+community Seren player files. It uses Seren's `getSources` action, so you get the same source list as for movies. If an episode does not start,
+check `tail -n 60 ~/Library/Logs/kodi.log`.
 
 ## 4. Run
 

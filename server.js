@@ -1,7 +1,7 @@
 // Kodi Explorer - tiny local server (no dependencies, Node 18+).
 // - Serves the UI from ./public
 // - Proxies GET /tmdb/* to the TMDB API, adding your key server-side
-// - POST /kodi/play {tmdbId} tells Kodi to play that movie via TMDb Helper
+// - POST /kodi/play {tmdbId} (movie) or {tmdbId, type:'tv', season, episode} tells Kodi to play it via TMDb Helper
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -159,9 +159,18 @@ function raiseKodi() {
 async function playOnKodi(req, res) {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const { tmdbId } = JSON.parse(await readBody(req) || '{}');
+    const { tmdbId, type, season, episode } = JSON.parse(await readBody(req) || '{}');
     if (!Number.isInteger(tmdbId)) { res.writeHead(400); return res.end(JSON.stringify({ error: 'tmdbId must be an integer' })); }
-    const file = `plugin://plugin.video.themoviedb.helper/?info=play&tmdb_type=movie&tmdb_id=${tmdbId}`;
+    let file = `plugin://plugin.video.themoviedb.helper/?info=play&tmdb_type=movie&tmdb_id=${tmdbId}`;
+    if (type === 'tv') {
+      // Every value is checked as a whole number before it goes into the plugin URL.
+      if (!Number.isInteger(season) || season < 0 || !Number.isInteger(episode) || episode < 1) {
+        res.writeHead(400); return res.end(JSON.stringify({ error: 'season and episode must be whole numbers' }));
+      }
+      file = `plugin://plugin.video.themoviedb.helper/?info=play&tmdb_type=tv&tmdb_id=${tmdbId}&season=${season}&episode=${episode}`;
+    } else if (type !== undefined && type !== 'movie') {
+      res.writeHead(400); return res.end(JSON.stringify({ error: 'type must be movie or tv' }));
+    }
     try {
       const started = await ensureKodi();
       console.log('[kodi] Player.Open', file);
