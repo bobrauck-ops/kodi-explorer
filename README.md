@@ -45,7 +45,7 @@ Edit `config.json`:
 | Key | Meaning |
 |---|---|
 | `tmdbKey` | TMDB API key or v4 read access token |
-| `kodi.host` / `kodi.port` | Kodi web server. Use `127.0.0.1` if Kodi is on the same Mac |
+| `kodi.host` / `kodi.port` | Kodi web server. Use `127.0.0.1` if Kodi is on the same Mac (that address never changes, whatever network you are on) |
 | `kodi.user` / `kodi.password` | Kodi web server login |
 | `bringKodiToFront` | macOS only. Raises the already-running Kodi window when you press Play (default true). Never launches Kodi by name |
 | `kodiAppPath` | Optional, macOS. Exact app to launch if Kodi is not running, e.g. `/Applications/Kodi.app` |
@@ -97,6 +97,34 @@ node server.js
 Open http://localhost:3000. Press **Play on Kodi** on a movie. Kodi comes to the front on
 Seren's source list. Pick a source. (If you skipped the default-player step above, Kodi first
 asks which player to use. Choose Seren.)
+
+### Optional: start automatically at login (macOS)
+
+From the project folder:
+
+```
+bash scripts/install-autostart.sh
+```
+
+This installs a macOS launch agent. Kodi Explorer then starts whenever you log in, restarts if it
+stops, and needs no Terminal window. Bookmark http://localhost:3000. Its log is
+`~/Library/Logs/kodi-explorer.log`. If you used `node server.js` in a Terminal before, press
+Ctrl+C there first, because only one copy can use the port. After changing `config.json`, apply it with:
+
+```
+launchctl kickstart -k gui/$(id -u)/com.kodi-explorer
+```
+
+To remove it: `bash scripts/uninstall-autostart.sh`.
+
+Prefer a manual start? Double-click **Kodi Explorer.command**. It starts the server if needed and
+opens the page. (The first time, macOS may require right-click > Open.)
+
+### Network note
+
+The server listens on this computer only (`127.0.0.1`), so other devices on your Wi-Fi cannot reach
+it. Only set `listenHost` in `config.json` if you deliberately want access from another device,
+and remember anyone on that network could then use your TMDB key and control Kodi.
 
 ## Troubleshooting
 

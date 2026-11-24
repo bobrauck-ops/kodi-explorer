@@ -14,6 +14,8 @@ if (!fs.existsSync(cfgPath)) {
 }
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 const PORT = cfg.listenPort || 3000;
+// Listen on this computer only. Anything else on the same Wi-Fi could otherwise use your TMDB key and press Play in Kodi.
+const HOST = cfg.listenHost || '127.0.0.1';
 const PUBLIC = path.join(__dirname, 'public');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
 
@@ -127,7 +129,7 @@ async function playOnKodi(req, res) {
   }
 }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && url.pathname.startsWith('/tmdb/')) return proxyTmdb(req, res, url);
   if (req.method === 'POST' && url.pathname === '/kodi/play') return playOnKodi(req, res);
@@ -138,4 +140,10 @@ http.createServer(async (req, res) => {
     return fs.createReadStream(file).pipe(res);
   }
   res.writeHead(405); res.end();
-}).listen(PORT, () => console.log(`Kodi Explorer running at http://localhost:${PORT}`));
+});
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use. Kodi Explorer may already be running (open http://localhost:${PORT}), or change listenPort in config.json.`);
+  else console.error('Server error:', e.message);
+  process.exit(1);
+});
+server.listen(PORT, HOST, () => console.log(`Kodi Explorer running at http://localhost:${PORT} (listening on ${HOST} only)`));
