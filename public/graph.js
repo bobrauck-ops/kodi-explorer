@@ -277,7 +277,7 @@ function renderGraphPage() {
   GRAPH.fitZ = fitZoom(aspect);
   const z = effectiveZoom();
   const play = f.type === 'movie'
-    ? `<button class="play" onclick="playOnKodi(${f.tmdbId}, ${JSON.stringify(f.title).replace(/"/g, '&quot;')})">▶ Play on Kodi</button>` : '';
+    ? `<button class="play" onclick="playOnKodi(${f.tmdbId}, ${JSON.stringify(f.title).replace(/"/g, '&quot;')})">▶ Play on Kodi</button><button class="alt" onclick="openDetails(${f.tmdbId})">ℹ Details &amp; trailer</button>` : '';
   view.innerHTML = `<div class="gbar">${play}<div class="overview">${esc(short(f.overview || '', 240))}</div>
       <div class="zoom"><button onclick="graphZoom(-1)" title="Smaller (−)">A−</button><span>${GRAPH.zoom === 'fit' ? 'Fit' : Math.round(z * 100) + '%'}</span><button onclick="graphZoom(1)" title="Larger (+)">A+</button>${GRAPH.zoom === 'fit' ? '' : '<button onclick="setZoom(\'fit\')" title="Fit to window">Fit</button>'}</div></div>
     <div class="gwrap" id="gwrap" style="--z:${z}">${svg}</div>

@@ -18,6 +18,10 @@ by TMDB. Movie data is provided by [The Movie Database](https://www.themoviedb.o
 - Click any node to re-centre the graph on it. The breadcrumb trail shows where you have been.
 - Click **+N more** to expand a group (for example the rest of the cast).
 - **Play on Kodi** appears on movie pages.
+- **Details & trailer** (next to Play, in both views) opens a panel with the trailer and the
+  movie's tagline, overview, release date, runtime, US rating, score, language, countries,
+  budget and box office. Nothing is requested from YouTube until you press the trailer's play
+  button, and trailers use YouTube's privacy-enhanced player. Esc or a click outside closes it.
 - **Size:** the graph starts in **Fit** mode (largest size that fits your window). Use **A+ / A−** in the
   bar above the graph, or the **+ / −** keys, to make everything larger or smaller. Larger sizes
   scroll sideways. **Fit** returns to the default. Your choice is remembered in the browser.
@@ -75,14 +79,24 @@ cp docs/seren.json "$D/seren.json"
 This file is based on community examples for Seren 3.x and may need adjusting for other
 Seren versions. On other systems, use that add-on's `userdata/addon_data/...` folder.
 
+Then make Seren the default so Kodi skips TMDb Helper's player-choice dialog:
+
+1. In Kodi: Add-ons > Video add-ons > TheMovieDb Helper > Settings (context menu).
+2. In the list of sections on the left, scroll down past "Trakt" and open **Players**.
+   Some skins clip that list without a scroll bar, so the section can be easy to miss.
+3. Click the default player for **Movies** and choose **Seren**. Leave the TV default alone
+   (the supplied `seren.json` only handles movies).
+4. Press OK.
+
 ## 4. Run
 
 ```
 node server.js
 ```
 
-Open http://localhost:3000. Press **Play on Kodi** on a movie. In Kodi, choose Seren if asked,
-then pick a source.
+Open http://localhost:3000. Press **Play on Kodi** on a movie. Kodi comes to the front on
+Seren's source list. Pick a source. (If you skipped the default-player step above, Kodi first
+asks which player to use. Choose Seren.)
 
 ## Troubleshooting
 
