@@ -157,7 +157,7 @@ async function playOnKodi(tmdbId, title) {
   try {
     const r = await fetch('/kodi/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tmdbId }) });
     const j = await r.json();
-    toast(j.sent ? 'Sent to Kodi. Check your TV (Seren may ask you to pick a source).' : (j.error || 'Failed'), 6000);
+    toast(j.sent ? 'Sent to Kodi. Look at the Kodi window: pick Seren if asked, then choose a source.' : (j.error || 'Failed'), 6000);
   } catch (e) { toast('Failed: ' + e.message, 6000); }
 }
 

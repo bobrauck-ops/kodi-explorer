@@ -5,6 +5,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const cfgPath = path.join(__dirname, 'config.json');
 if (!fs.existsSync(cfgPath)) {
@@ -54,8 +55,45 @@ async function kodiCall(method, params, timeoutMs) {
       method: 'POST', headers, signal: ctl.signal,
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     });
+    if (r.status === 401) throw new Error('Kodi rejected the login (HTTP 401). Check kodi.user and kodi.password in config.json.');
+    if (!r.ok) throw new Error('Kodi answered with HTTP ' + r.status);
     return await r.json();
   } finally { clearTimeout(timer); }
+}
+
+// On macOS, bring the ALREADY RUNNING Kodi window to the front so its dialogs (player choice,
+// Seren source select) are visible. We never launch Kodi by name, because with several Kodi
+// versions installed macOS may pick the wrong one. Instead we find the running Kodi's .app path
+// and activate that exact app. Disable with "bringKodiToFront": false in config.json.
+// Optional: set "kodiAppPath" (e.g. "/Applications/Kodi.app") to launch that specific app
+// when no Kodi is running.
+function findRunningKodiApps(cb) {
+  execFile('ps', ['-axww', '-o', 'command='], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+    if (err) return cb([]);
+    const apps = new Set();
+    for (const line of stdout.split('\n')) {
+      const m = line.match(/^(\/.*?\.app)\/Contents\/MacOS\/Kodi(?:\s|$)/);
+      if (m) apps.add(m[1]);
+    }
+    cb([...apps]);
+  });
+}
+
+function raiseKodi() {
+  if (process.platform !== 'darwin' || cfg.bringKodiToFront === false) return;
+  const report = (err) => { if (err) console.log('[kodi] could not raise Kodi window:', err.message); };
+  findRunningKodiApps((apps) => {
+    if (apps.length > 1) console.log('[kodi] warning: several Kodi apps are running:', apps.join(' | '));
+    if (apps.length) {
+      console.log('[kodi] raising running Kodi:', apps[0]);
+      execFile('open', [apps[0]], report);
+    } else if (cfg.kodiAppPath) {
+      console.log('[kodi] Kodi is not running; launching', cfg.kodiAppPath);
+      execFile('open', [cfg.kodiAppPath], report);
+    } else {
+      console.log('[kodi] Kodi does not appear to be running. Start it first, or set "kodiAppPath" in config.json.');
+    }
+  });
 }
 
 async function playOnKodi(req, res) {
@@ -65,15 +103,27 @@ async function playOnKodi(req, res) {
     if (!Number.isInteger(tmdbId)) { res.writeHead(400); return res.end(JSON.stringify({ error: 'tmdbId must be an integer' })); }
     const file = `plugin://plugin.video.themoviedb.helper/?info=play&tmdb_type=movie&tmdb_id=${tmdbId}`;
     try {
+      console.log('[kodi] Player.Open', file);
+      raiseKodi();
       const out = await kodiCall('Player.Open', { item: { file } }, 4000);
+      console.log('[kodi] response:', JSON.stringify(out));
+      if (out.error) {
+        res.writeHead(502);
+        return res.end(JSON.stringify({ error: 'Kodi rejected the command: ' + (out.error.message || JSON.stringify(out.error)) }));
+      }
       res.writeHead(200); res.end(JSON.stringify({ sent: true, kodi: out }));
     } catch (e) {
       // Player.Open can block until a source is picked/playback starts. A timeout usually means "it's working".
-      if (e.name === 'AbortError') { res.writeHead(200); return res.end(JSON.stringify({ sent: true, note: 'Command sent; Kodi is still resolving sources (e.g. Seren source select).' })); }
+      if (e.name === 'AbortError') {
+        console.log('[kodi] no reply within 4s (Kodi may still be resolving sources)');
+        res.writeHead(200); return res.end(JSON.stringify({ sent: true, note: 'No reply from Kodi within 4s; it may still be resolving sources.' }));
+      }
       throw e;
     }
   } catch (e) {
-    res.writeHead(502); res.end(JSON.stringify({ error: 'Could not reach Kodi: ' + e.message }));
+    const cause = e.cause && e.cause.code ? ` (${e.cause.code})` : '';
+    console.log('[kodi] ERROR:', e.message + cause, `| target http://${cfg.kodi.host}:${cfg.kodi.port}`);
+    res.writeHead(502); res.end(JSON.stringify({ error: 'Could not reach Kodi: ' + e.message + cause }));
   }
 }
 

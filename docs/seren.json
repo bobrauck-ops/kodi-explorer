@@ -1,0 +1,7 @@
+{
+  "name": "Seren",
+  "plugin": "plugin.video.seren",
+  "priority": 100,
+  "is_resolvable": "false",
+  "play_movie": "plugin://plugin.video.seren/?action=getSources&actionArgs=%7B%22item_type%22%3A%20%22movie%22%2C%20%22trakt_id%22%3A%20{trakt}%7D"
+}
