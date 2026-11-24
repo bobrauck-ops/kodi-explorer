@@ -25,6 +25,13 @@ by TMDB. Movie data is provided by [The Movie Database](https://www.themoviedb.o
 - **Size:** the graph starts in **Fit** mode (largest size that fits your window). Use **A+ / A−** in the
   bar above the graph, or the **+ / −** keys, to make everything larger or smaller. Larger sizes
   scroll sideways. **Fit** returns to the default. Your choice is remembered in the browser.
+- **Motion:** click a node and it glides to the centre while the old graph dims. If you were just
+  looking at something that also appears in the new graph (for example the film you came from, now
+  in the director's filmography), it travels from where it was to its new place; everything else
+  spreads out from the centre. The **Motion: on/off** button in the bar above the graph turns this
+  off (remembered in the browser). It is also skipped automatically if macOS "Reduce motion" is on.
+  To change the speed, edit `slow` in the `MOTION` line in `public/graph.js` (1 = fast, 1.25 = the
+  default, 2 = twice as slow).
 - The **List view / Graph view** button in the header switches between the two views of the
   same item.
 

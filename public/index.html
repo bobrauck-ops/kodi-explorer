@@ -37,6 +37,7 @@
   #alt:hover { color:var(--accent); border-color:var(--accent); }
   .gwrap { overflow:auto; }
   .gwrap svg.graph { display:block; height:calc(76vh * var(--z, 1)); width:auto; max-width:none; margin:0 auto; }
+  svg.graph .shape, svg.graph .cshape, svg.graph .cap, svg.graph .ccap { transform-box:fill-box; transform-origin:center; }
   svg.graph .node { cursor:pointer; }
   svg.graph .node:hover { filter:brightness(1.35); }
   .gbar { display:flex; gap:18px; align-items:center; margin:0 auto 4px; min-height:44px; }
@@ -206,7 +207,9 @@ async function playOnKodi(tmdbId, title) {
 // ---------- router ----------
 async function route() {
   const parts = location.hash.replace(/^#\//, '').split('/');
-  view.innerHTML = '<p class="msg">Loading…</p>';
+  // Graph to graph by clicking a node: keep the old graph on screen so it can animate out (see graph.js).
+  if (parts[0] !== 'g') { GRAPH.leaving = null; GRAPH.handoff = null; }
+  if (!(parts[0] === 'g' && GRAPH.leaving)) view.innerHTML = '<p class="msg">Loading…</p>';
   // toggle between the graph view and the list view of the same item
   const alt = $('#alt');
   if (parts[0] === 'g' && parts[1]) { alt.textContent = '☰ List view'; alt.href = '#/' + parts.slice(1).join('/'); alt.style.display = ''; }

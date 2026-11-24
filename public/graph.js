@@ -127,7 +127,8 @@ function drawNode(n, x, y, scale = 1, noCaption = false, side = 'below') {
       (n.sub ? `<text x="${tx}" y="${sy}" text-anchor="${anchor}" fill="#9aa1b5" font-size="13.5" stroke="#12141a" stroke-width="3.5" paint-order="stroke">${esc(short(n.sub, 24))}</text>` : '');
   }
   const attr = n.more ? `data-more="${esc(n.more)}"` : n.href ? `data-href="${esc(n.href)}"` : '';
-  return `<g class="node" ${attr}><title>${esc(n.label)}${n.sub ? ' — ' + esc(n.sub) : ''}</title>${shape}${caption}</g>`;
+  // .shape and .cap are separate groups so the shape can glide while its caption fades (see leaveGraph).
+  return `<g class="node" ${attr} data-kind="${n.kind}" data-x="${x}" data-y="${y}"><title>${esc(n.label)}${n.sub ? ' — ' + esc(n.sub) : ''}</title><g class="shape">${shape}</g>${caption ? `<g class="cap">${caption}</g>` : ''}</g>`;
 }
 
 // Returns { svg, box } where box = [minX, minY, maxX, maxY] of what the centre node occupies.
@@ -146,9 +147,9 @@ function drawCenter(f, cx, cy) {
     halfW = 72; bottom = cy + 72;
   }
   const title = short(f.title, 30), sub = short(f.sub, 44);
-  const svg = `<g>${shape}
+  const svg = `<g class="center"><g class="cshape">${shape}</g><g class="ccap">
     <text x="${cx}" y="${bottom + 28}" text-anchor="middle" fill="#fff" font-size="22" font-weight="700" stroke="#12141a" stroke-width="5" paint-order="stroke">${esc(title)}</text>
-    <text x="${cx}" y="${bottom + 50}" text-anchor="middle" fill="#9aa1b5" font-size="15" stroke="#12141a" stroke-width="4" paint-order="stroke">${esc(sub)}</text></g>`;
+    <text x="${cx}" y="${bottom + 50}" text-anchor="middle" fill="#9aa1b5" font-size="15" stroke="#12141a" stroke-width="4" paint-order="stroke">${esc(sub)}</text></g></g>`;
   const halfLabel = Math.max(halfW, title.length * 6.2, sub.length * 4.2);
   return { svg, box: [cx - halfLabel, cy - (f.type === 'movie' ? 97.5 : f.type === 'person' ? 80 : 72), cx + halfLabel, bottom + 58] };
 }
@@ -228,7 +229,7 @@ function graphSvg(f) {
   const vb = [minX - M, minY - M, maxX - minX + 2 * M, maxY - minY + 2 * M].map((v) => Math.round(v));
 
   nodes.forEach(([, x, y]) => edges.push(`<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2b3040" stroke-width="2"/>`));
-  const labelSvg = labels.map(([t, x, y]) => `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle" fill="#8b92a6" font-size="14" letter-spacing="2" stroke="#12141a" stroke-width="5" paint-order="stroke">${esc(t.toUpperCase())}</text>`).join('');
+  const labelSvg = labels.map(([t, x, y]) => `<text class="glabel" x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="middle" fill="#8b92a6" font-size="14" letter-spacing="2" stroke="#12141a" stroke-width="5" paint-order="stroke">${esc(t.toUpperCase())}</text>`).join('');
   const nodeSvg = nodes.map(([n, x, y, side]) => drawNode(n, +x.toFixed(1), +y.toFixed(1), 1, false, side)).join('');
   return `<svg class="graph" viewBox="${vb.join(' ')}" xmlns="http://www.w3.org/2000/svg">${edges.join('')}${labelSvg}${nodeSvg}${center.svg}</svg>`;
 }
@@ -268,7 +269,131 @@ function graphZoom(dir) {
   else { const prv = [...ZOOMS].reverse().find((z) => z < cur - 0.04); if (prv) setZoom(prv); }
 }
 
-function renderGraphPage() {
+// ---------- motion ----------
+// Level 2 transition: when you click a node it glides to the centre and grows while the rest of the old
+// graph fades (leaveGraph). When the next graph is ready it takes over from exactly that spot, and the new
+// nodes spread out from the centre (enterGraph). Skipped when "reduce motion" is set in macOS, or switched
+// off with the Motion button.
+function loadMotion() {
+  try { return localStorage.getItem('kodiExplorerMotion') !== 'off'; } catch (e) { return true; }
+}
+GRAPH.motion = loadMotion();
+function motionOn() {
+  if (!GRAPH.motion) return false;
+  try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false; } catch (e) { /* ignore */ }
+  return typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
+}
+function toggleMotion() {
+  GRAPH.motion = !GRAPH.motion;
+  try { localStorage.setItem('kodiExplorerMotion', GRAPH.motion ? 'on' : 'off'); } catch (e) { /* ignore */ }
+  renderGraphPage();
+}
+const EASE = 'cubic-bezier(.4, 0, .2, 1)';
+// Timings in milliseconds. "slow" scales every duration and delay at once: 1 = base speed, 1.25 = 25% slower.
+const MOTION = { slow: 1.25, leave: 260, enter: 330, travel: 420, stagger: 12, staggerMax: 200, dim: 0.15 };
+const CENTER_SCALE = { movie: 130 / 74, person: 1.9, other: 1.5 };
+
+// Identity of a node across graphs: "person/6384", "movie/603", "genre/28" (the genre's name is ignored).
+function nodeKey(href) {
+  const m = /^#\/g\/([a-z]+)\/([^/]+)/.exec(href || '');
+  return m ? m[1] + '/' + decodeURIComponent(m[2]) : null;
+}
+const centreOf = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; };
+
+// Phase 1, runs the moment you click. The clicked node glides to the centre and grows; everything else
+// dims (not vanishes) so that nodes that appear in BOTH graphs can travel from where they were (level 3).
+// Returns a promise that resolves when the animation is done.
+function leaveGraph(nodeEl) {
+  try {
+    const svg = nodeEl.closest('svg.graph');
+    const shape = nodeEl.querySelector('.shape');
+    const ctm = svg && svg.getScreenCTM();
+    if (!svg || !shape || !ctm) return null;
+    // Remember where every known node is on screen BEFORE anything moves.
+    const before = {};
+    svg.querySelectorAll(':scope > .node[data-href]').forEach((n) => {
+      const k = nodeKey(n.dataset.href), sh = n.querySelector('.shape');
+      if (k && sh && !before[k]) before[k] = centreOf(sh);
+    });
+    const cur = GRAPH.current, cs = svg.querySelector(':scope > .center .cshape');
+    if (cur && cs) before[cur.type + '/' + cur.id] = centreOf(cs);
+    delete before[nodeKey(nodeEl.dataset.href)];            // the clicked node is handled as the new centre
+    const pt = svg.createSVGPoint(); pt.x = 0; pt.y = 0;
+    const c = pt.matrixTransform(ctm);                       // where the centre node sits on screen
+    const r = shape.getBoundingClientRect();
+    const kind = nodeEl.dataset.kind === 'movie' || nodeEl.dataset.kind === 'person' ? nodeEl.dataset.kind : 'other';
+    const s = CENTER_SCALE[kind];
+    const dx = (c.x - (r.left + r.width / 2)) / ctm.a, dy = (c.y - (r.top + r.height / 2)) / ctm.a;
+    const anims = [];
+    const A = (el, kf, opt = {}) => {
+      anims.push(el.animate(kf, { easing: EASE, fill: 'forwards', ...opt, duration: (opt.duration ?? MOTION.leave) * MOTION.slow, delay: (opt.delay || 0) * MOTION.slow }));
+    };
+    svg.appendChild(nodeEl);                                 // paint the travelling node above the old centre
+    const move = `translate(${dx}px, ${dy}px) scale(${s})`;
+    A(shape, kind === 'other'
+      ? [{ transform: 'none', opacity: 1 }, { transform: move, opacity: 1, offset: 0.6 }, { transform: move, opacity: 0 }]
+      : [{ transform: 'none' }, { transform: move }]);
+    const cap = nodeEl.querySelector('.cap');
+    if (cap) A(cap, [{ opacity: 1 }, { opacity: 0 }], { duration: 140 });
+    svg.querySelectorAll(':scope > line, :scope > .glabel').forEach((el) => A(el, [{ opacity: 1 }, { opacity: 0 }], { duration: 200 }));
+    svg.querySelectorAll(':scope > .node, :scope > .center').forEach((el) => {
+      if (el !== nodeEl) A(el, [{ opacity: 1 }, { opacity: MOTION.dim }], { duration: 200 });
+    });
+    svg.querySelectorAll(':scope > .node .cap, :scope > .center .ccap').forEach((el) => { if (!nodeEl.contains(el)) A(el, [{ opacity: 1 }, { opacity: 0 }], { duration: 140 }); });
+    GRAPH.handoff = { x: c.x, y: c.y, w: r.width * s, kind, before, sy: window.scrollY };
+    return Promise.all(anims.map((a) => a.finished)).catch(() => { /* cancelled: carry on */ });
+  } catch (e) { return null; }
+}
+
+// Phase 2, runs right after the new graph is in the page.
+function enterGraph(svg, handoff) {
+  try {
+    const ctm = svg.getScreenCTM();
+    const sy = handoff.sy || 0;                              // the page is scrolled to the top again by now
+    const A = (el, kf, opt = {}) => {
+      const a = el.animate(kf, { easing: EASE, fill: 'both', ...opt, duration: (opt.duration ?? MOTION.enter) * MOTION.slow, delay: (opt.delay || 0) * MOTION.slow });
+      a.finished.then(() => a.cancel()).catch(() => { /* cancelled */ });
+    };
+    // FLIP: start the element where something used to be (on screen), then let it settle into its real place.
+    const from = (el, old) => {
+      const r = el.getBoundingClientRect();
+      const dx = (old.x - (r.left + r.width / 2)) / ctm.a, dy = (old.y + sy - (r.top + r.height / 2)) / ctm.a;
+      const s = r.width > 0 && old.w > 0 ? old.w / r.width : 1;
+      return `translate(${dx}px, ${dy}px) scale(${s})`;
+    };
+    const center = svg.querySelector(':scope > .center');
+    const cshape = center && center.querySelector('.cshape');
+    const ccap = center && center.querySelector('.ccap');
+    if (ctm && cshape) {
+      const f = from(cshape, handoff);
+      if (handoff.kind === 'other') A(cshape, [{ transform: f, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 260 });
+      else A(cshape, [{ transform: f }, { transform: 'none' }], { duration: 260 });
+      if (ccap) A(ccap, [{ opacity: 0 }, { opacity: 1 }], { duration: 240, delay: 120 });
+    } else if (center) {
+      A(center, [{ opacity: 0 }, { opacity: 1 }], { duration: 220 });
+    }
+    const used = new Set();
+    [...svg.querySelectorAll(':scope > .node')].forEach((n, i) => {
+      const key = nodeKey(n.dataset.href);
+      const old = key && !used.has(key) && handoff.before ? handoff.before[key] : null;
+      const shape = n.querySelector('.shape'), cap = n.querySelector('.cap');
+      if (old && ctm && shape) {
+        // Level 3: this node was on screen a moment ago, so it travels from there instead of appearing.
+        used.add(key);
+        A(shape, [{ transform: from(shape, old), opacity: MOTION.dim }, { transform: 'none', opacity: 1 }], { duration: MOTION.travel });
+        if (cap) A(cap, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, delay: MOTION.travel * 0.55 });
+        return;
+      }
+      const x = +n.dataset.x || 0, y = +n.dataset.y || 0, delay = Math.min(i * MOTION.stagger, MOTION.staggerMax);
+      if (shape) A(shape, [{ transform: `translate(${-x}px, ${-y}px) scale(0.35)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: MOTION.enter, delay });
+      if (cap) A(cap, [{ opacity: 0 }, { opacity: 1 }], { duration: 220, delay: delay + 220 });
+    });
+    svg.querySelectorAll(':scope > line').forEach((l) => A(l, [{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 260 }));   // after the nodes have mostly landed
+    svg.querySelectorAll(':scope > .glabel').forEach((t) => A(t, [{ opacity: 0 }, { opacity: 1 }], { duration: 250, delay: 340 }));
+  } catch (e) { /* animation is decoration only */ }
+}
+
+function renderGraphPage(opts) {
   const f = GRAPH.current;
   if (!f) return;
   const svg = graphSvg(f);
@@ -279,20 +404,36 @@ function renderGraphPage() {
   const play = f.type === 'movie'
     ? `<button class="play" onclick="playOnKodi(${f.tmdbId}, ${JSON.stringify(f.title).replace(/"/g, '&quot;')})">▶ Play on Kodi</button><button class="alt" onclick="openDetails(${f.tmdbId})">ℹ Details &amp; trailer</button>` : '';
   view.innerHTML = `<div class="gbar">${play}<div class="overview">${esc(short(f.overview || '', 240))}</div>
-      <div class="zoom"><button onclick="graphZoom(-1)" title="Smaller (−)">A−</button><span>${GRAPH.zoom === 'fit' ? 'Fit' : Math.round(z * 100) + '%'}</span><button onclick="graphZoom(1)" title="Larger (+)">A+</button>${GRAPH.zoom === 'fit' ? '' : '<button onclick="setZoom(\'fit\')" title="Fit to window">Fit</button>'}</div></div>
+      <div class="zoom"><button onclick="graphZoom(-1)" title="Smaller (−)">A−</button><span>${GRAPH.zoom === 'fit' ? 'Fit' : Math.round(z * 100) + '%'}</span><button onclick="graphZoom(1)" title="Larger (+)">A+</button>${GRAPH.zoom === 'fit' ? '' : '<button onclick="setZoom(\'fit\')" title="Fit to window">Fit</button>'}<button onclick="toggleMotion()" title="Animate moving between nodes">Motion: ${GRAPH.motion ? 'on' : 'off'}</button></div></div>
     <div class="gwrap" id="gwrap" style="--z:${z}">${svg}</div>
     <div class="ghint">Click a node to re-centre on it. “+N more” expands a group. Use A− / A+ (or the + and − keys) to change the size.</div>`;
   const w = document.getElementById('gwrap');
   if (w) w.scrollLeft = (w.scrollWidth - w.clientWidth) / 2;
+  if (opts && opts.enter && w && motionOn()) {
+    const sv = w.querySelector('svg.graph');
+    if (sv) { if (opts.handoff) enterGraph(sv, opts.handoff); else sv.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200 * MOTION.slow, easing: EASE }); }
+  }
 }
 
 async function showGraph(type, id, name) {
+  // Was this reached by clicking a node? Then the old graph is mid-animation and we hand over to the new one.
+  const leaving = GRAPH.leaving && Date.now() - GRAPH.leavingAt < 5000 ? GRAPH.leaving : null;
+  const handoff = leaving ? GRAPH.handoff : null;
+  GRAPH.leaving = null; GRAPH.handoff = null;
   const ok = type === 'year' ? /^\d{4}$/.test(id) : /^\d+$/.test(id);
   if (!ok) { view.innerHTML = '<p class="msg">Not a valid item.</p>'; return; }
-  const f = await loadFocus(type, id, name);
+  let f;
+  try { [f] = await Promise.all([loadFocus(type, id, name), leaving]); }
+  catch (e) {
+    if (!leaving || !GRAPH.current) throw e;
+    renderGraphPage();                               // put the old graph back instead of leaving it faded out
+    toast('Could not load that: ' + e.message, 5000);
+    return;
+  }
   GRAPH.current = f;
   pushTrail('g' + type + id, f.title);
-  renderGraphPage();
+  if (handoff && window.scrollY) window.scrollTo(0, 0);   // keep screen positions comparable (see enterGraph)
+  renderGraphPage({ enter: true, handoff });
 }
 
 if (typeof window !== 'undefined') {
@@ -310,7 +451,12 @@ if (typeof document !== 'undefined') {
     const t = e.target.closest && e.target.closest('.graph [data-more], .graph [data-href]');
     if (!t) return;
     if (t.dataset.more) { GRAPH.expanded[t.dataset.more] = true; renderGraphPage(); }
-    else if (t.dataset.href) location.hash = t.dataset.href;
+    else if (t.dataset.href) {
+      if (t.dataset.href.startsWith('#/g/') && t.dataset.href !== location.hash && !GRAPH.leaving && motionOn()) {
+        GRAPH.leaving = leaveGraph(t); GRAPH.leavingAt = Date.now();
+      }
+      location.hash = t.dataset.href;
+    }
   });
 }
 if (typeof module !== 'undefined') module.exports = { graphSvg, GRAPH };
