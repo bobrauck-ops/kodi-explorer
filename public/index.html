@@ -197,11 +197,14 @@ async function showSearch(q) {
 function toast(msg, ms = 4000) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), ms); }
 async function playOnKodi(tmdbId, title) {
   toast('Sending "' + title + '" to Kodi…');
+  // If Kodi is not open the server starts it and waits for it, which can take up to a minute.
+  const slow = setTimeout(() => toast('Waiting for Kodi to start… this can take up to a minute.', 95000), 3000);
   try {
     const r = await fetch('/kodi/play', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tmdbId }) });
     const j = await r.json();
     toast(j.sent ? 'Sent to Kodi. Switch to the Kodi window and choose a source.' : (j.error || 'Failed'), 6000);
   } catch (e) { toast('Failed: ' + e.message, 6000); }
+  finally { clearTimeout(slow); }
 }
 
 // ---------- router ----------

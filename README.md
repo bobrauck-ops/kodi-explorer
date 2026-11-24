@@ -55,7 +55,9 @@ Edit `config.json`:
 | `kodi.host` / `kodi.port` | Kodi web server. Use `127.0.0.1` if Kodi is on the same Mac (that address never changes, whatever network you are on) |
 | `kodi.user` / `kodi.password` | Kodi web server login |
 | `bringKodiToFront` | macOS only. Raises the already-running Kodi window when you press Play (default true). Never launches Kodi by name |
-| `kodiAppPath` | Optional, macOS. Exact app to launch if Kodi is not running, e.g. `/Applications/Kodi.app` |
+| `kodiAppPath` | Optional, macOS. Which Kodi app to start if it is not running, e.g. `/Applications/Kodi.app`. If you leave it out, the one Kodi app in `/Applications` is used. Set it if you have several |
+| `kodiStartTimeoutSec` | Optional. How long to wait for Kodi to start answering before giving up. Default 90 |
+| `kodiSettleSec` | Optional. Extra seconds to wait after a freshly started Kodi answers, so its add-ons finish loading. Default 6. If Play does nothing the first time after Kodi was started for you, raise it (try 10) |
 
 `config.json` is git-ignored. Never commit it: it holds your key and password.
 
@@ -101,7 +103,7 @@ Then make Seren the default so Kodi skips TMDb Helper's player-choice dialog:
 node server.js
 ```
 
-Open http://localhost:3000. Press **Play on Kodi** on a movie. Kodi comes to the front on
+Open http://localhost:3000. Press **Play on Kodi** on a movie. If Kodi is not open yet, it is started for you and Play is sent once it is ready (this can take up to a minute; the page says so). Kodi comes to the front on
 Seren's source list. Pick a source. (If you skipped the default-player step above, Kodi first
 asks which player to use. Choose Seren.)
 
