@@ -32,6 +32,13 @@
   .card:hover img { border-color:var(--accent); }
   .card .t { font-size:13px; margin-top:5px; } .card .s { font-size:12px; color:var(--dim); }
   .noimg { aspect-ratio:2/3; border-radius:8px; background:var(--panel); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:12px; text-align:center; padding:6px; }
+  .homehead { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+  .homehead h2 { margin:0 0 4px; font-size:20px; } .homesub { margin:0; color:var(--dim); font-size:14px; max-width:640px; }
+  button.shuffle { background:var(--chip); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 16px; font-size:15px; cursor:pointer; white-space:nowrap; }
+  button.shuffle:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); } button.shuffle:disabled { opacity:.6; cursor:default; }
+  .homegrid { transition:opacity .15s; } .homegrid .card { animation:cardin .35s ease both; }
+  @keyframes cardin { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { .homegrid .card { animation:none; } }
   #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--accent); padding:10px 16px; border-radius:8px; display:none; z-index:9; }
   #alt { color:var(--dim); text-decoration:none; font-size:13px; border:1px solid var(--line); border-radius:999px; padding:5px 12px; white-space:nowrap; }
   #alt:hover { color:var(--accent); border-color:var(--accent); }
@@ -84,12 +91,13 @@
   <a id="alt" href="#" style="display:none"></a>
 </header>
 <div id="trail"></div>
-<main id="view"><p class="msg">Search for a movie or person to start exploring.</p></main>
+<main id="view"><p class="msg">Loading…</p></main>
 <div id="toast"></div>
 <footer>This product uses the TMDB API but is not endorsed or certified by TMDB. Data and images from The Movie Database (themoviedb.org).</footer>
 
 <script src="graph.js"></script>
 <script src="details.js"></script>
+<script src="home.js"></script>
 <script>
 const IMG = 'https://image.tmdb.org/t/p/';
 const $ = (s) => document.querySelector(s);
@@ -226,7 +234,7 @@ async function route() {
     else if (parts[0] === 'year') await showYear(parts[1]);
     else if (parts[0] === 'genre') await showGenre(parts[1], decodeURIComponent(parts[2] || 'Genre'));
     else if (parts[0] === 'search') await showSearch(decodeURIComponent(parts[1]));
-    else view.innerHTML = '<p class="msg">Search for a movie or person to start exploring.</p>';
+    else await showHome();
     window.scrollTo(0, 0);
   } catch (e) { view.innerHTML = '<p class="msg">Something went wrong: ' + esc(e.message) + '</p>'; }
 }

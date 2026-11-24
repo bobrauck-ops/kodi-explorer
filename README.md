@@ -17,6 +17,11 @@ by TMDB. Movie data is provided by [The Movie Database](https://www.themoviedb.o
   sit on a ring.
 - Click any node to re-centre the graph on it. The breadcrumb trail shows where you have been.
 - Click **+N more** to expand a group (for example the rest of the cast).
+- **Home page:** opening the app shows 30 random films rated 7.5 or higher by at least 1,000 people.
+  Click a poster to explore it. The selection is new every time the app is opened or reloaded, and
+  **New selection** draws another 30 (avoiding films already shown that session). Going back or
+  clicking the logo keeps the current selection. To make the picks more or less famous, change
+  `HOME_RULES` at the top of `public/home.js`.
 - **Play on Kodi** appears on movie pages.
 - **Details & trailer** (next to Play, in both views) opens a panel with the trailer and the
   movie's tagline, overview, release date, runtime, US rating, score, language, countries,
